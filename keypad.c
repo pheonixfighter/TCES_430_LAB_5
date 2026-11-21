@@ -5,6 +5,7 @@
  */
 
 
+#include "stm32f746xx.h"
 #include "stm32f7xx.h"
 #include <stdint.h>
 
@@ -19,13 +20,40 @@ void keypad_disable_interrupts(void);
  * The number of rows and columns on the keypad
  */
 #define KEYPAD_ROW_COLUMN_NUMBER 4
+
+/**
+ * Interrupt priority for keypad
+ */
 #define KEYPAD_INTERRUPT_PRIORITY (9UL << 4)
 
+/**
+ * A character mapping of the keypad
+ */
 const char keypad_map[KEYPAD_ROW_COLUMN_NUMBER][KEYPAD_ROW_COLUMN_NUMBER] =
 		{{'1', '2', '3', 'A'},
 		 {'4', '5', '6', 'B'},
 		 {'7', '8', '9', 'C'},
 		 {'*', '0', '#', 'D'}};
+
+/**
+ * A mapping of the rows to the GPIO port they are connected to
+ */
+const GPIO_TypeDef* ROW_GPIO_PORTS[KEYPAD_ROW_COLUMN_NUMBER] = {GPIOF, GPIOF, GPIOF, GPIOA};
+
+/**
+ * A mapping of the pin numbers on the GPIO ports form the columns
+ */
+const int ROW_GPIO_PIN_NUMBERS[KEYPAD_ROW_COLUMN_NUMBER] = {8, 9, 10, 0};
+
+/**
+ * A mapping of the columns to the GPIO port they are connected to
+ */
+const GPIO_TypeDef* COLUMN_GPIO_PORTS[KEYPAD_ROW_COLUMN_NUMBER] = {GPIOH, GPIOI, GPIOG, GPIOB};
+
+/**
+ * A mapping of the columns to the pin number on the connected ports
+ */
+const int COLUMN_GPIO_PIN_NUMBERS[KEYPAD_ROW_COLUMN_NUMBER] = {6, 0, 7, 4};
 
 /**
  * Initializes the following pins for the connections listed below:
@@ -34,9 +62,9 @@ const char keypad_map[KEYPAD_ROW_COLUMN_NUMBER][KEYPAD_ROW_COLUMN_NUMBER] =
  * D5 (I0) -> Keypad pin 3 (column 1)
  * D6 (H6) -> Keypad pin 4 (column 0)
  * A0 (A0) -> Keypad pin 5 (Row 3)
- * A1 (F10) -> Keypad pin 6 (column 2)
- * A2 (F9) -> Keypad pin 7 (column 1)
- * A3 (F8) -> Keypad pin 6 (column 0)
+ * A1 (F10) -> Keypad pin 6 (Row 2)
+ * A2 (F9) -> Keypad pin 7 (Row 1)
+ * A3 (F8) -> Keypad pin 8 (Row 0)
  *
  * The following interrupts will also be set up to make it so that the rows trigger
  * a keypad read:
@@ -82,14 +110,22 @@ void keypad_initialize(){
 	NVIC->ISER[1] |= (1 << 14);
 
 	// puts keypad in the idle state, which means that the pins are initialized to wait for an interrupt
-	// and the interrupts are enabled
+	// and the interrupts are enabled to run
 	keypad_idle();
 }
 
 /**
  * Sets the column pins to pull-up input and row pins to 0. Because of the way that the
  * MCU pins are set up on the Arduino header, we are going to drive the rows low and
- * configure the columns to listen and receive interrupts
+ * configure the columns to listen and receive interrupts. The following pins are configured:
+ * D3 (B4) -> output low
+ * D4 (G7) -> output low
+ * D5 (I0) -> output low
+ * D6 (H6) -> output low
+ * A0 (A0) -> input pull-up
+ * A1 (F10) -> input pull-up
+ * A2 (F9) -> input pull-up
+ * A3 (F8) -> input pull-up
  */
 void keypad_idle(){
 	// Sets D3 (B4) to output low
@@ -136,25 +172,81 @@ void keypad_idle(){
 }
 
 /**
- * Sets the keypad pins to scan the keypad. More specifically, the following are set:
- *
+ * Sets the keypad pins to scan the keypad with the first More specifically, the following are set:
+ * D3 (B4) -> input pull-up
+ * D4 (G7) -> input pull-up
+ * D5 (I0) -> input pull-up
+ * D6 (H6) -> input pull-up
+ * A0 (A0) -> output high
+ * A1 (F10) -> output high
+ * A2 (F9) -> output high
+ * A3 (F8) -> output high
  */
 void keypad_activate(){
 
-	// Sets D3 (B4) to pull-up
+	keypad_disable_interrupts();
+
+	// Sets D3 (B4) to input pull-up
+	GPIOB->MODER &= ~(3UL << (2 * 4));
+	GPIOB->PUPDR &= ~(3UL << (2 * 4));
+	GPIOB->PUPDR |= (1UL << (2 * 4));
+
+	// Sets D4 (G7) to input pull-up
+	GPIOG->MODER &= ~(3UL << (2 * 7));
+	GPIOG->PUPDR &= ~(3UL << (2 * 7));
+	GPIOC->PUPDR |= (1UL << 2 * 7);
+
+	// Sets D5 (I0) to input pull-up
+	GPIOI->MODER &= ~3UL;
+	GPIOI->PUPDR &= ~3UL;
+	GPIOI->PUPDR |= (1UL);
+
+	// Sets D6 (H6) to input pull-up
+	GPIOH->MODER &= ~(3UL << (2 * 6));
+	GPIOH->PUPDR &= ~(3UL << (2 * 6));
+	GPIOH->PUPDR |= (1 << (2 * 6));
+
+	// Sets A0 (A0) to output high
+	GPIOA->MODER &= ~(3UL);
+	GPIOA->MODER |= 1UL;
+	GPIOA->BSRR |= 1UL;
+
+	// Sets A1 (F10) to output high
+	GPIOF->MODER &= ~(3UL << (2 * 10));
+	GPIOF->MODER |= (1UL << (2 * 10));
+	GPIOF->BSRR |= (1 << 10);
+
+	// Sets A2 (F9) to output high
+	GPIOF->MODER &= ~(3UL << (2 * 9));
+	GPIOF->MODER |= (1UL << (2 * 10));
+	GPIOF->BSRR |= (1 << 9);
+
+	// Sets A3 (F8) to output high
+	GPIOF->MODER &= ~(3UL << (2 * 8));
+	GPIOF->MODER |= (1UL << (2 * 8));
+	GPIOF->BSRR |= (1 << 8);
 }
 
 /**
  * Scans the keypad for the button press
  */
 char keypad_scan(){
+
+
+
 	return 0;
 }
 
+/**
+ * Unmasks EXTI interrupts via the EXTI IMR
+ */
 void keypad_enable_interrupts(){
-
+	EXTI->IMR |= (1UL << 0) | (1UL << 8) | (1UL << 9) | (1UL << 10);
 }
 
+/**
+ * Masks EXTI interrupts via the EXTI IMR
+ */
 void keypad_disable_interrupts(){
-
+	EXTI->IMR |= ~((1UL << 0) | (1UL << 8) | (1UL << 9) | (1UL << 10));
 }
