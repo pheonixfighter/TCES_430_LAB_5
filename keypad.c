@@ -232,7 +232,17 @@ void keypad_activate(){
  */
 char keypad_scan(){
 
-
+	keypad_activate();
+	for (int i = 0; i < KEYPAD_ROW_COLUMN_NUMBER; i++){
+		// drive row i low
+		ROW_GPIO_PORTS[i]->BSRR |= (1 << (ROW_GPIO_PIN_NUMBERS[i] + 16));
+		// reads the columns
+		for(int j = 0; j < KEYPAD_ROW_COLUMN_NUMBER; j++){
+			if ((COLUMN_GPIO_PORTS[i]->IDR >> (COLUMN_GPIO_PIN_NUMBERS[i])) & 0b1UL){
+				return keypad_map[i][j];
+			}
+		}
+	}
 
 	return 0;
 }
