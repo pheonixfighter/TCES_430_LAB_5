@@ -260,3 +260,21 @@ void keypad_enable_interrupts(){
 void keypad_disable_interrupts(){
 	EXTI->IMR |= ~((1UL << 0) | (1UL << 8) | (1UL << 9) | (1UL << 10));
 }
+
+void EXTI0_IRQHandler(){
+	keypad_activate();
+	keypad_scan();
+	keypad_idle();
+}
+
+void EXTI9_5_IRQHandler(){
+	keypad_activate();
+	keypad_scan();
+	keypad_idle();
+}
+
+void EXTI15_10_IRQHandler(){
+	keypad_activate();
+	keypad_scan();
+	keypad_idle();
+}
