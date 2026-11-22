@@ -8,6 +8,7 @@
 #include "stm32f746xx.h"
 #include "stm32f7xx.h"
 #include <stdint.h>
+#include "keypad.h"
 
 
 void keypad_idle(void);
@@ -27,6 +28,11 @@ void keypad_disable_interrupts(void);
 #define KEYPAD_INTERRUPT_PRIORITY (9UL << 4)
 
 /**
+ * Keypad EXTI mask/unmask pin expression
+ */
+#define KEYPAD_EXTI_MASK ((1UL << 0) | (1UL << 8) | (1UL << 9) | (1UL << 10))
+
+/**
  * A character mapping of the keypad
  */
 const char keypad_map[KEYPAD_ROW_COLUMN_NUMBER][KEYPAD_ROW_COLUMN_NUMBER] =
@@ -35,25 +41,30 @@ const char keypad_map[KEYPAD_ROW_COLUMN_NUMBER][KEYPAD_ROW_COLUMN_NUMBER] =
 		 {'7', '8', '9', 'C'},
 		 {'*', '0', '#', 'D'}};
 
+
+volatile char keypad_character_buffer[CHAR_BUFFER_SIZE];
+volatile int keypad_character_buffer_index = 0;
+
+
 /**
  * A mapping of the rows to the GPIO port they are connected to
  */
-const GPIO_TypeDef* ROW_GPIO_PORTS[KEYPAD_ROW_COLUMN_NUMBER] = {GPIOF, GPIOF, GPIOF, GPIOA};
+GPIO_TypeDef* ROW_GPIO_PORTS[KEYPAD_ROW_COLUMN_NUMBER] = {GPIOF, GPIOF, GPIOF, GPIOA};
 
 /**
  * A mapping of the pin numbers on the GPIO ports form the columns
  */
-const int ROW_GPIO_PIN_NUMBERS[KEYPAD_ROW_COLUMN_NUMBER] = {8, 9, 10, 0};
+int ROW_GPIO_PIN_NUMBERS[KEYPAD_ROW_COLUMN_NUMBER] = {8, 9, 10, 0};
 
 /**
  * A mapping of the columns to the GPIO port they are connected to
  */
-const GPIO_TypeDef* COLUMN_GPIO_PORTS[KEYPAD_ROW_COLUMN_NUMBER] = {GPIOH, GPIOI, GPIOG, GPIOB};
+GPIO_TypeDef* COLUMN_GPIO_PORTS[KEYPAD_ROW_COLUMN_NUMBER] = {GPIOH, GPIOI, GPIOG, GPIOB};
 
 /**
  * A mapping of the columns to the pin number on the connected ports
  */
-const int COLUMN_GPIO_PIN_NUMBERS[KEYPAD_ROW_COLUMN_NUMBER] = {6, 0, 7, 4};
+int COLUMN_GPIO_PIN_NUMBERS[KEYPAD_ROW_COLUMN_NUMBER] = {6, 0, 7, 4};
 
 /**
  * Initializes the following pins for the connections listed below:
@@ -75,8 +86,8 @@ const int COLUMN_GPIO_PIN_NUMBERS[KEYPAD_ROW_COLUMN_NUMBER] = {6, 0, 7, 4};
  */
 void keypad_initialize(){
 	// Ensures that necessary clocks are enabled
-	// 0 for GPIOA, 1 for GPIOB, 5 for GPIOE, 7 for GPIOH, and 8 for GPIOI
-	RCC->AHB1ENR |= (1UL << 0) | (1UL << 1) | (1UL << 5) | (1UL << 7) | (1UL << 8);
+	// 0 for GPIOA, 1 for GPIOB, 5 for GPIOF, 7 for GPIOH, and 8 for GPIOI
+	RCC->AHB1ENR |= (1UL << 0) | (1UL << 1) | (1UL << 5) | (1UL << 6) | (1UL << 7) | (1UL << 8);
 
 	// Enables SYSFG clock for interrupts
 	RCC->APB2ENR |= (1UL << 14);
@@ -85,33 +96,34 @@ void keypad_initialize(){
 
 	// Configures EXTI0 to A0
 	SYSCFG->EXTICR[0] &= ~(0xFUL);
-	EXTI->IMR |= (1UL);
 	EXTI->FTSR |= (1UL);
 	EXTI->RTSR &= ~(1UL);
 	NVIC->IP[6] = KEYPAD_INTERRUPT_PRIORITY;
 	NVIC->ISER[0] = (1 << 6);
 
+
 	// Configures EXTI9 and EXTI8
 	SYSCFG->EXTICR[2] &= ~(0xFFUL);
-	SYSCFG->EXTICR[2] |= (0x6UL) | (0x6UL << 4); // multiplexes EXTI8 and EXTI9 to F8 and F9 respectively
-	EXTI->IMR |= (1UL << 8) | (1UL << 9);
+	SYSCFG->EXTICR[2] |= (0x5UL) | (0x5UL << 4); // multiplexes EXTI8 and EXTI9 to F8 and F9 respectively
 	EXTI->FTSR |= (1UL << 8) | (1UL << 9);
 	EXTI->RTSR &= ~((1UL << 8) | (1UL << 9));
-	NVIC->IP[30] = KEYPAD_INTERRUPT_PRIORITY;
-	NVIC->ISER[0] = (1 << 30);
+	NVIC->IP[23] = KEYPAD_INTERRUPT_PRIORITY;
+	NVIC->ISER[0] |= (1 << 23);
 
 	// Configures EXTI10
 	SYSCFG->EXTICR[2] &= ~(0xFUL << 8);
-	SYSCFG->EXTICR[2] |= (6UL << 8);
-	EXTI->IMR |= (1UL << 10);
+	SYSCFG->EXTICR[2] |= (5UL << 8);
 	EXTI->FTSR |= (1 << 10);
 	EXTI->RTSR &= ~(1 << 10);
-	NVIC->IP[47] = KEYPAD_INTERRUPT_PRIORITY;
-	NVIC->ISER[1] |= (1 << 14);
+	NVIC->IP[40] = KEYPAD_INTERRUPT_PRIORITY;
+	NVIC->ISER[1] |= (1 << 8);
 
 	// puts keypad in the idle state, which means that the pins are initialized to wait for an interrupt
 	// and the interrupts are enabled to run
 	keypad_idle();
+
+	EXTI->PR |= KEYPAD_EXTI_MASK;
+	keypad_enable_interrupts();
 }
 
 /**
@@ -128,10 +140,30 @@ void keypad_initialize(){
  * A3 (F8) -> input pull-up
  */
 void keypad_idle(){
+	// Sets A0 (A0) to input pull-up
+	GPIOA->MODER &= ~(3UL);
+	GPIOA->PUPDR &= ~(3UL);
+	GPIOA->PUPDR |= 1;
+
+	// Sets A1 (F10) to input pull-up
+	GPIOF->MODER &= ~(3UL << (2 * 10));
+	GPIOF->PUPDR &= ~(3UL << (2 * 10));
+	GPIOF->PUPDR |= (1UL << (2 * 10));
+
+	// Sets A2 (F9) to input pull-up
+	GPIOF->MODER &= ~(3UL << (2 * 9));
+	GPIOF->PUPDR &= ~(3UL << (2 * 9));
+	GPIOF->PUPDR |= (1UL << (2 * 9));
+
+	// Sets A3 (F8) to input pull-up
+	GPIOF->MODER &= ~(3UL << (2 * 8));
+	GPIOF->PUPDR &= ~(3UL << (2 * 8));
+	GPIOF->PUPDR |= (1UL << (2 * 8));
+
 	// Sets D3 (B4) to output low
 	GPIOB->MODER &= ~(3UL << (2 * 4));
 	GPIOB->MODER |= (1UL << (2 * 4));
-	GPIOB->BSRR |= (1 << 16 + 4);
+	GPIOB->BSRR |= (1 << (16 + 4));
 
 	// Sets D4 (G7) to output low
 	GPIOG->MODER &= ~(3UL << (2 * 7));
@@ -148,27 +180,6 @@ void keypad_idle(){
 	GPIOH->MODER |= (1UL << (2 * 6));
 	GPIOH->BSRR |= (1 << (6 + 16));
 
-	// Sets A0 (A0) to input pull-up
-	GPIOA->MODER &= ~(3UL);
-	GPIOA->PUPDR &= ~(3UL);
-	GPIOA->PUPDR |= 1;
-
-	// Sets A1 (F10) to input pull-up
-	GPIOF->MODER &= ~(3UL << (2 * 10));
-	GPIOF->PUPDR &= ~(3UL << (2 * 10));
-	GPIOF->PUPDR |= (1UL << (2 * 10));
-
-	// Sets A2 (F9) to input pull-up
-	GPIOF->MODER &= (3UL << (2 * 9));
-	GPIOF->PUPDR &= ~(3UL << (2 * 9));
-	GPIOF->PUPDR |= (1UL << (2 * 9));
-
-	// Sets A4 (F8) to input pull-up
-	GPIOF->MODER &= (3UL << (2 * 7));
-	GPIOF->PUPDR &= (3UL << (2 * 7));
-	GPIOF->PUPDR |= (1UL << (2 * 7));
-
-	keypad_enable_interrupts();
 }
 
 /**
@@ -194,7 +205,7 @@ void keypad_activate(){
 	// Sets D4 (G7) to input pull-up
 	GPIOG->MODER &= ~(3UL << (2 * 7));
 	GPIOG->PUPDR &= ~(3UL << (2 * 7));
-	GPIOC->PUPDR |= (1UL << 2 * 7);
+	GPIOG->PUPDR |= (1UL << 2 * 7);
 
 	// Sets D5 (I0) to input pull-up
 	GPIOI->MODER &= ~3UL;
@@ -218,7 +229,7 @@ void keypad_activate(){
 
 	// Sets A2 (F9) to output high
 	GPIOF->MODER &= ~(3UL << (2 * 9));
-	GPIOF->MODER |= (1UL << (2 * 10));
+	GPIOF->MODER |= (1UL << (2 * 9));
 	GPIOF->BSRR |= (1 << 9);
 
 	// Sets A3 (F8) to output high
@@ -227,54 +238,47 @@ void keypad_activate(){
 	GPIOF->BSRR |= (1 << 8);
 }
 
-/**
- * Scans the keypad for the button press
- */
-char keypad_scan(){
 
+void keypad_scan(void){
+	char scanned_character = 0;
 	keypad_activate();
+	for (volatile int d = 0; d < 500; d++) __asm("NOP");     // settle
+
 	for (int i = 0; i < KEYPAD_ROW_COLUMN_NUMBER; i++){
-		// drive row i low
-		ROW_GPIO_PORTS[i]->BSRR |= (1 << (ROW_GPIO_PIN_NUMBERS[i] + 16));
-		// reads the columns
-		for(int j = 0; j < KEYPAD_ROW_COLUMN_NUMBER; j++){
-			if ((COLUMN_GPIO_PORTS[i]->IDR >> (COLUMN_GPIO_PIN_NUMBERS[i])) & 0b1UL){
-				return keypad_map[i][j];
+		ROW_GPIO_PORTS[i]->BSRR = (1UL << (ROW_GPIO_PIN_NUMBERS[i] + 16));  // row low
+		for (volatile int d = 0; d < 500; d++);
+		for (int j = 0; j < KEYPAD_ROW_COLUMN_NUMBER; j++){
+			if (!((COLUMN_GPIO_PORTS[j]->IDR >> COLUMN_GPIO_PIN_NUMBERS[j]) & 1UL)){
+				scanned_character = keypad_map[i][j];
+				break;
 			}
 		}
+		ROW_GPIO_PORTS[i]->BSRR = (1UL << ROW_GPIO_PIN_NUMBERS[i]);         // row high
+		if (scanned_character) break;
 	}
 
-	return 0;
+	if (scanned_character && keypad_character_buffer_index < CHAR_BUFFER_SIZE){
+		keypad_character_buffer[keypad_character_buffer_index++] = scanned_character;
+	}
 }
 
-/**
- * Unmasks EXTI interrupts via the EXTI IMR
- */
-void keypad_enable_interrupts(){
-	EXTI->IMR |= (1UL << 0) | (1UL << 8) | (1UL << 9) | (1UL << 10);
+
+static void keypad_handle_press(void){
+	keypad_disable_interrupts();
+	keypad_scan();                  // masks EXTI via keypad_activate()
+	keypad_idle();                  // restore pins (no longer enables EXTI)
+	EXTI->PR = KEYPAD_EXTI_MASK;    // clear edges caused by the scan
+	keypad_enable_interrupts();
 }
 
-/**
- * Masks EXTI interrupts via the EXTI IMR
- */
-void keypad_disable_interrupts(){
-	EXTI->IMR |= ~((1UL << 0) | (1UL << 8) | (1UL << 9) | (1UL << 10));
+void EXTI0_IRQHandler(void){     keypad_handle_press(); }
+void EXTI9_5_IRQHandler(void){   keypad_handle_press(); }
+void EXTI15_10_IRQHandler(void){ keypad_handle_press(); }
+
+void keypad_enable_interrupts(void){
+	EXTI->IMR |= KEYPAD_EXTI_MASK;
 }
 
-void EXTI0_IRQHandler(){
-	keypad_activate();
-	keypad_scan();
-	keypad_idle();
-}
-
-void EXTI9_5_IRQHandler(){
-	keypad_activate();
-	keypad_scan();
-	keypad_idle();
-}
-
-void EXTI15_10_IRQHandler(){
-	keypad_activate();
-	keypad_scan();
-	keypad_idle();
+void keypad_disable_interrupts(void){
+	EXTI->IMR &= ~KEYPAD_EXTI_MASK;
 }

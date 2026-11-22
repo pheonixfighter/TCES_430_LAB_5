@@ -5,6 +5,8 @@
  *      Author: Robert Cromer
  */
 
+#include <stdint.h>
+
 #ifndef LCD_H_
 #define LCD_H_
 

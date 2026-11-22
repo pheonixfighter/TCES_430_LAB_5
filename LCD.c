@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include "LCD.h"
 #include "stm32f7xx.h"
+#include "stm32f746xx.h"
 
 void TIM3Init(void){
 	// enable TIM3 clock
@@ -48,6 +49,8 @@ void TIM3_DelayMs(uint32_t miliseconds){
  * 	-Data 7: D15 (B8)
  */
 void initializeLCDPins(void) {
+	RCC->AHB1ENR |= (1 << 1) | (1 << 2) | (1 << 6) | (1 << 8);
+
 	// Initializes D0 (C7)
 	GPIOC->MODER &= ~(3UL << (7 * 2));
 	GPIOC->MODER |= (1UL << (7 * 2));
@@ -113,9 +116,9 @@ void sendNibble(uint8_t nibble, uint8_t RS){
 
 	// Cycle enable pulse to send data
 	GPIOG->BSRR |= (1 << (6 + BSRRShift(1))); // Sets enable high
-	TIM3_DelayMs(2);
+	TIM3_DelayMs(10);
 	GPIOG->BSRR |= (1 << (6 + BSRRShift(0))); // Sets enable high
-	TIM3_DelayMs(2);
+	TIM3_DelayMs(10);
 }
 
 
@@ -141,22 +144,20 @@ void sendData(uint8_t data) {
 
 void LCDInit(void){
 	// initializes the TIM3 clock
-#ifndef TIM3_INITIALIZED
 	TIM3Init();
-#endif
 	initializeLCDPins();
 
 	TIM3_DelayMs(100);
 
 	// standard setup for HD44780 display
 	sendNibble(0x03, 0);
-	TIM3_DelayMs(2);
+	TIM3_DelayMs(10);
 	sendNibble(0x03, 0);
 	TIM3_DelayMs(10);
 	sendNibble(0x03, 0);
-	TIM3_DelayMs(2);
+	TIM3_DelayMs(10);
 	sendNibble(0x02, 0); // Activates 4-bit projile structure
-	TIM3_DelayMs(2);
+	TIM3_DelayMs(10);
 
 	// Operational profile parameters
 	sendCommand(0x28); // Configures 4-bit mode with 2 lines of selection layout and a 5X8 font
