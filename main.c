@@ -28,7 +28,7 @@
 #define GRANTED_SECONDS     3       /* how long "Access Granted!" stays up */
 #define KEY_BEEP_MS         100
 #define GRANTED_TONE_MS     2000
-#define LOCK_PULSE_MS       200
+#define LOCK_PULSE_MS       800
 
 #define LCD_LINE_CHARS      16
 
@@ -257,6 +257,7 @@ int main(void)
 			   The loop never blocks, so the countdown keeps running. */
 			if (timer6_tick()){
 				seconds--;
+				buzzer_run(500);
 				if (seconds == 0){
 					timer6_stop();
 					attempts = 0;
@@ -265,9 +266,7 @@ int main(void)
 					state = STATE_ENTER_PIN;
 				} else {
 					printStateToLCD(STATE_LOCKED, seconds, 0);
-					if (seconds & 1){            /* pulse on alternating seconds */
-						buzzer_run(LOCK_PULSE_MS);
-					}
+					//buzzer_run(LOCK_PULSE_MS);
 				}
 			}
 			break;

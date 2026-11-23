@@ -10,6 +10,7 @@
 
 int BUZZER_COUNTS = 0;
 int BUZZER_PIN_ON = 0;
+int buzzer_running = 0;
 
 
 /**
@@ -50,6 +51,7 @@ void buzzer_init(){
 
 void buzzer_run(uint32_t millis){
 	if (millis < 2) millis = 2;
+	buzzer_running = 1;
 	TIM2->CR1 &= ~1UL;
 	TIM4->CR1 &= ~1UL;
 	TIM2->CNT = 0;
@@ -60,6 +62,7 @@ void buzzer_run(uint32_t millis){
 	TIM4->ARR = millis - 1;
 	TIM2->CR1 |= 1UL;
 	TIM4->CR1 |= 1UL;
+	while(buzzer_running);
 }
 
 /**
@@ -84,4 +87,5 @@ void TIM4_IRQHandler(){
 	TIM4->CR1 &= ~(1 << 0);
 	TIM2->SR &= ~(1 << 0);
 	TIM4->SR &= ~(1 << 0);
+	buzzer_running = 0;
 }
